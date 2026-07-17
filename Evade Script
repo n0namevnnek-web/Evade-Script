@@ -39,5 +39,941 @@ end
 -------------------------------------------------------------------------------
 -- 👇 YOUR MAIN SCRIPT CODE STARTS HERE 👇
 -------------------------------------------------------------------------------
+-- NNVN HUB - By N0NAMEVN
+repeat task.wait() until game:IsLoaded()
 
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- ============================================
+-- WINDOW & THEME
+-- ============================================
+local Window = Rayfield:CreateWindow({
+    Name = "NNVN HUB",
+    LoadingTitle = "NNVN HUB",
+    LoadingSubtitle = "By N0NAMEVN",
+    ShowText = "RayField",
+    Icon = 0,
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "NNVN-HUB",
+        FileName = "NNVNConfig"
+    },
+    Discord = {Enabled = false, Invite = "", RememberJoins = false},
+    KeySystem = false,
+    KeySettings = {Title = "", Subtitle = "", Note = "", FileName = "", SaveKey = false, GrabKeyFromSite = false, Key = {""}}
+})
+
+-- ============================================
+-- VARIABLES
+-- ============================================
+local Config = {
+    Speed = 16,
+    JumpPower = 50,
+    Gravity = 50,
+    EdashEnabled = false,
+    CFrameSpeed = false,
+    AutoRevive = false,
+    AutoReviveAll = false,
+    ReviveInterval = 3,
+    AntiAFK = true,
+    FullBright = false,
+    SuperBright = false,
+    NoFog = false,
+    Vibrant = false,
+    FPSBoost = false,
+    EspPlayers = false,
+    EspBots = false,
+    EspDistance = false,
+}
+
+-- Connections
+local Connections = {
+    CFrameSpeed = nil,
+    AntiAFK = nil,
+    BotESP = nil,
+    PlayerAdded = nil,
+}
+
+-- State variables
+local IsHoldingSpace = false
+local IsHoldingEdashButton = false
+local EdashButtonGui = nil
+local EdashButtonConnections = {}
+local LastReviveCheck = 0
+local LastReviveAllCheck = 0
+local OriginalLighting = {}
+
+-- Save original lighting values
+OriginalLighting = {
+    Brightness = Lighting.Brightness,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    Ambient = Lighting.Ambient,
+    GlobalShadows = Lighting.GlobalShadows,
+    FogEnd = Lighting.FogEnd,
+    FogStart = Lighting.FogStart,
+    ColorCorrectionEnabled = Lighting.ColorCorrection.Enabled,
+    Saturation = Lighting.ColorCorrection.Saturation,
+    Contrast = Lighting.ColorCorrection.Contrast,
+}
+
+-- ============================================
+-- CREATE TABS
+-- ============================================
+local CombatTab = Window:CreateTab("⚔️ Combat", nil)
+local MovementTab = Window:CreateTab("🏃 Movement", nil)
+local VisualTab = Window:CreateTab("👁️ Visual", nil)
+local MiscTab = Window:CreateTab("⚙️ Misc", nil)
+
+-- ============================================
+-- UTILITY FUNCTIONS
+-- ============================================
+
+-- Revive Self
+local function ReviveSelf()
+    local char = LocalPlayer.Character
+    if char and char:GetAttribute("Downed") == true then
+        local events = ReplicatedStorage:FindFirstChild("Events")
+        if events and events.Player and events.Player.ChangePlayerMode then
+            pcall(function()
+                events.Player.ChangePlayerMode:FireServer(true)
+            end)
+            return true
+        end
+    end
+    return false
+end
+
+-- Revive Other Player (SỬA LẠI)
+local function RevivePlayer(player)
+    if not player or player == LocalPlayer then return false end
+    
+    local char = player.Character
+    if not char then return false end
+    
+    -- Kiểm tra xem player có đang downed không
+    if char:GetAttribute("Downed") == true then
+        local events = ReplicatedStorage:FindFirstChild("Events")
+        if events then
+            -- Cách 1: Dùng Interact event (đúng cho Evade)
+            local interact = events:FindFirstChild("Character") and events.Character:FindFirstChild("Interact")
+            if interact and interact:IsA("RemoteEvent") then
+                local success = false
+                pcall(function()
+                    interact:FireServer("Revive", true, player.Name)
+                    success = true
+                end)
+                if success then return true end
+            end
+            
+            -- Cách 2: Dùng Player.Revive (nếu có)
+            local playerRevive = events:FindFirstChild("Player") and events.Player:FindFirstChild("Revive")
+            if playerRevive and playerRevive:IsA("RemoteEvent") then
+                local success = false
+                pcall(function()
+                    playerRevive:FireServer(player)
+                    success = true
+                end)
+                if not success then
+                    pcall(function()
+                        playerRevive:FireServer(player.Name)
+                        success = true
+                    end)
+                end
+                if success then return true end
+            end
+            
+            -- Cách 3: Dùng ChangePlayerMode với argument đúng
+            local changeMode = events:FindFirstChild("Player") and events.Player:FindFirstChild("ChangePlayerMode")
+            if changeMode and changeMode:IsA("RemoteEvent") then
+                local success = false
+                pcall(function()
+                    changeMode:FireServer(player)
+                    success = true
+                end)
+                if not success then
+                    pcall(function()
+                        changeMode:FireServer(player.Name)
+                        success = true
+                    end)
+                end
+                if success then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- Scan and Revive All Players (SỬA LẠI)
+local function ScanAndReviveAll()
+    local revivedCount = 0
+    local players = Players:GetPlayers()
+    
+    for _, player in pairs(players) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            if char and char:IsA("Model") then
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                local isDowned = char:GetAttribute("Downed")
+                local health = humanoid and humanoid.Health or 0
+                
+                -- Nếu đang downed hoặc health <= 0
+                if isDowned == true or health <= 0 then
+                    local success = RevivePlayer(player)
+                    if success then
+                        revivedCount = revivedCount + 1
+                        task.wait(0.1)
+                    end
+                end
+            end
+        end
+    end
+    return revivedCount
+end
+
+-- ESP Functions
+local function CreateESP(character, color, text, parentPart, yOffset)
+    if not character or not parentPart or not parentPart:IsA("BasePart") then return end
+    if character:FindFirstChild("ESP_Highlight") then return end
+
+    -- Highlight
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ESP_Highlight"
+    highlight.Adornee = character
+    highlight.FillColor = color
+    highlight.FillTransparency = 0.4
+    highlight.OutlineColor = color
+    highlight.OutlineTransparency = 0.2
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = character
+
+    -- Billboard
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ESP_Billboard"
+    billboard.Size = UDim2.new(0, 120, 0, 40)
+    billboard.AlwaysOnTop = true
+    billboard.StudsOffset = Vector3.new(0, yOffset or 2, 0)
+    billboard.Adornee = parentPart
+    billboard.Parent = parentPart
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = tostring(text) or ""
+    label.TextColor3 = color
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.Parent = billboard
+
+    -- Distance updater
+    task.spawn(function()
+        local cam = Workspace.CurrentCamera
+        while highlight.Parent and billboard.Parent and parentPart.Parent and cam do
+            local dist = (cam.CFrame.Position - parentPart.Position).Magnitude
+            if Config.EspDistance then
+                label.Text = tostring(text) .. " (" .. math.floor(dist) .. "m)"
+            else
+                label.Text = tostring(text)
+            end
+            task.wait(0.15)
+        end
+        highlight:Destroy()
+        billboard:Destroy()
+    end)
+end
+
+local function RemoveESP(character, parentPart)
+    if character then
+        local h = character:FindFirstChild("ESP_Highlight")
+        if h then h:Destroy() end
+    end
+    if parentPart then
+        local b = parentPart:FindFirstChild("ESP_Billboard")
+        if b then b:Destroy() end
+    end
+end
+
+-- Lighting Functions
+local function SetFullBright(enabled)
+    if enabled then
+        Lighting.Brightness = 2
+        Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+        Lighting.Ambient = Color3.new(1, 1, 1)
+        Lighting.GlobalShadows = false
+    else
+        Lighting.Brightness = OriginalLighting.Brightness
+        Lighting.OutdoorAmbient = OriginalLighting.OutdoorAmbient
+        Lighting.Ambient = OriginalLighting.Ambient
+        Lighting.GlobalShadows = OriginalLighting.GlobalShadows
+    end
+end
+
+local function SetSuperBright(enabled)
+    if enabled then
+        Lighting.Brightness = 15
+        Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+        Lighting.Ambient = Color3.new(1, 1, 1)
+        Lighting.GlobalShadows = false
+    else
+        SetFullBright(Config.FullBright)
+    end
+end
+
+local function SetNoFog(enabled)
+    if enabled then
+        Lighting.FogEnd = 1000000
+        Lighting.FogStart = 999999
+    else
+        Lighting.FogEnd = OriginalLighting.FogEnd
+        Lighting.FogStart = OriginalLighting.FogStart
+    end
+end
+
+local function SetVibrant(enabled)
+    if enabled then
+        Lighting.ColorCorrection.Enabled = true
+        Lighting.ColorCorrection.Saturation = 0.8
+        Lighting.ColorCorrection.Contrast = 0.4
+    else
+        Lighting.ColorCorrection.Enabled = OriginalLighting.ColorCorrectionEnabled
+        Lighting.ColorCorrection.Saturation = OriginalLighting.Saturation
+        Lighting.ColorCorrection.Contrast = OriginalLighting.Contrast
+    end
+end
+
+-- ============================================
+-- TAB 1: COMBAT ⚔️
+-- ============================================
+
+CombatTab:CreateSection("ESP Settings")
+
+CombatTab:CreateToggle({
+    Name = "Player ESP",
+    CurrentValue = false,
+    Flag = "Combat_PlayerESP",
+    Callback = function(Value)
+        Config.EspPlayers = Value
+        if Value then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+                    CreateESP(player.Character, Color3.new(0.2, 0.8, 0.4), player.Name, player.Character.Head, 2)
+                end
+            end
+            Connections.PlayerAdded = Players.PlayerAdded:Connect(function(player)
+                player.CharacterAdded:Connect(function(char)
+                    task.wait(0.2)
+                    if Config.EspPlayers and char:FindFirstChild("Head") then
+                        CreateESP(char, Color3.new(0.2, 0.8, 0.4), player.Name, char.Head, 2)
+                    end
+                end)
+            end)
+        else
+            if Connections.PlayerAdded then
+                Connections.PlayerAdded:Disconnect()
+                Connections.PlayerAdded = nil
+            end
+            for _, player in pairs(Players:GetPlayers()) do
+                if player.Character then
+                    RemoveESP(player.Character, player.Character:FindFirstChild("Head"))
+                end
+            end
+        end
+    end,
+})
+
+CombatTab:CreateToggle({
+    Name = "Bot ESP",
+    CurrentValue = false,
+    Flag = "Combat_BotESP",
+    Callback = function(Value)
+        Config.EspBots = Value
+        if Value then
+            Connections.BotESP = RunService.Heartbeat:Connect(function()
+                local botsFolder = Workspace:FindFirstChild("Game") and Workspace.Game:FindFirstChild("Players")
+                if botsFolder then
+                    for _, bot in pairs(botsFolder:GetChildren()) do
+                        if bot:IsA("Model") and bot:FindFirstChild("Hitbox") and not bot:FindFirstChild("ESP_Highlight") then
+                            bot.Hitbox.Transparency = 0.3
+                            CreateESP(bot, Color3.new(0.9, 0.2, 0.2), bot.Name, bot.Hitbox, -1)
+                        end
+                    end
+                end
+            end)
+        else
+            if Connections.BotESP then
+                Connections.BotESP:Disconnect()
+                Connections.BotESP = nil
+            end
+            local botsFolder = Workspace:FindFirstChild("Game") and Workspace.Game:FindFirstChild("Players")
+            if botsFolder then
+                for _, bot in pairs(botsFolder:GetChildren()) do
+                    if bot:IsA("Model") and bot:FindFirstChild("Hitbox") then
+                        bot.Hitbox.Transparency = 1
+                        RemoveESP(bot, bot.Hitbox)
+                    end
+                end
+            end
+        end
+    end,
+})
+
+CombatTab:CreateToggle({
+    Name = "Show Distance",
+    CurrentValue = false,
+    Flag = "Combat_Distance",
+    Callback = function(Value)
+        Config.EspDistance = Value
+    end,
+})
+
+CombatTab:CreateDivider()
+
+-- ============================================
+-- REVIVE SECTION
+-- ============================================
+CombatTab:CreateSection("Revive")
+
+-- Auto Revive Self
+CombatTab:CreateToggle({
+    Name = "Auto Revive Self",
+    CurrentValue = false,
+    Flag = "Combat_AutoRevive",
+    Callback = function(Value)
+        Config.AutoRevive = Value
+    end,
+})
+
+-- Auto Revive All Players
+CombatTab:CreateToggle({
+    Name = "Auto Revive All Players",
+    CurrentValue = false,
+    Flag = "Combat_AutoReviveAll",
+    Callback = function(Value)
+        Config.AutoReviveAll = Value
+    end,
+})
+
+-- Revive Interval Slider
+CombatTab:CreateSlider({
+    Name = "Revive Check Interval",
+    Range = {1, 10},
+    Increment = 0.5,
+    Suffix = "s",
+    CurrentValue = 3,
+    Flag = "Combat_ReviveInterval",
+    Callback = function(Value)
+        Config.ReviveInterval = Value
+    end,
+})
+
+-- Revive Self Now
+CombatTab:CreateButton({
+    Name = "Revive Self Now",
+    Callback = function()
+        if ReviveSelf() then
+            Rayfield:Notify({
+                Title = "NNVN HUB",
+                Content = "✅ Revived yourself!",
+                Duration = 2,
+            })
+        else
+            Rayfield:Notify({
+                Title = "NNVN HUB",
+                Content = "❌ Not downed or failed!",
+                Duration = 2,
+            })
+        end
+    end,
+})
+
+-- Revive All Now
+CombatTab:CreateButton({
+    Name = "Revive All Players Now",
+    Callback = function()
+        local count = ScanAndReviveAll()
+        Rayfield:Notify({
+            Title = "NNVN HUB",
+            Content = "🔄 Revived " .. count .. " players!",
+            Duration = 3,
+        })
+    end,
+})
+
+-- ============================================
+-- TAB 2: MOVEMENT 🏃
+-- ============================================
+
+MovementTab:CreateSection("Speed")
+
+MovementTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {1, 50},
+    Increment = 1,
+    Suffix = " Speed",
+    CurrentValue = 16,
+    Flag = "Move_Speed",
+    Callback = function(Value)
+        Config.Speed = Value
+        if Config.CFrameSpeed and LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = Value end
+        end
+    end,
+})
+
+MovementTab:CreateToggle({
+    Name = "CFrame Speed (Smooth)",
+    CurrentValue = false,
+    Flag = "Move_CFrameSpeed",
+    Callback = function(Value)
+        Config.CFrameSpeed = Value
+        if Value then
+            if Connections.CFrameSpeed then
+                Connections.CFrameSpeed:Disconnect()
+                Connections.CFrameSpeed = nil
+            end
+            Connections.CFrameSpeed = RunService.RenderStepped:Connect(function()
+                local char = LocalPlayer.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if char and hum and hrp then
+                    local dir = hum.MoveDirection
+                    if dir.Magnitude > 0 then
+                        hrp.CFrame = hrp.CFrame + dir * math.max(Config.Speed, 1) * 0.08
+                    end
+                end
+            end)
+        else
+            if Connections.CFrameSpeed then
+                Connections.CFrameSpeed:Disconnect()
+                Connections.CFrameSpeed = nil
+            end
+        end
+    end,
+})
+
+MovementTab:CreateDivider()
+
+MovementTab:CreateSection("Jump")
+
+MovementTab:CreateToggle({
+    Name = "Jump Boost",
+    CurrentValue = false,
+    Flag = "Move_JumpBoost",
+    Callback = function(Value)
+        if LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.UseJumpPower = Value end
+        end
+    end,
+})
+
+MovementTab:CreateSlider({
+    Name = "Jump Power",
+    Range = {0, 1000},
+    Increment = 5,
+    Suffix = " Power",
+    CurrentValue = 50,
+    Flag = "Move_JumpPower",
+    Callback = function(Value)
+        Config.JumpPower = Value
+        if LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.JumpPower = Value end
+        end
+    end,
+})
+
+MovementTab:CreateDivider()
+
+MovementTab:CreateSection("Edash")
+
+MovementTab:CreateToggle({
+    Name = "Auto Edash (Hold Space)",
+    CurrentValue = false,
+    Flag = "Move_Edash",
+    Callback = function(Value)
+        Config.EdashEnabled = Value
+    end,
+})
+
+MovementTab:CreateButton({
+    Name = "Mobile Edash Button",
+    Callback = function()
+        if EdashButtonGui then
+            EdashButtonGui:Destroy()
+            EdashButtonGui = nil
+            for _, conn in pairs(EdashButtonConnections) do
+                conn:Disconnect()
+            end
+            EdashButtonConnections = {}
+            return
+        end
+
+        local screenGui = Instance.new("ScreenGui")
+        screenGui.Name = "EdashButton"
+        screenGui.ResetOnSpawn = false
+        screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+        local button = Instance.new("TextButton")
+        button.Size = UDim2.new(0, 60, 0, 60)
+        button.Position = UDim2.new(0.85, 0, 0.8, 0)
+        button.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+        button.BackgroundTransparency = 0.3
+        button.Text = "EDASH"
+        button.TextScaled = true
+        button.TextColor3 = Color3.new(1, 1, 1)
+        button.Font = Enum.Font.GothamBold
+        button.Parent = screenGui
+
+        EdashButtonGui = screenGui
+
+        -- Dragging
+        local dragging = false
+        local dragInput, dragStart, buttonStart
+
+        button.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                IsHoldingEdashButton = true
+                dragStart = input.Position
+                buttonStart = button.Position
+            end
+        end)
+
+        button.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement then
+                dragInput = input
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if input == dragInput and dragging then
+                local delta = input.Position - dragStart
+                button.Position = UDim2.new(buttonStart.X.Scale, buttonStart.X.Offset + delta.X,
+                                            buttonStart.Y.Scale, buttonStart.Y.Offset + delta.Y)
+            end
+        end)
+
+        button.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+                IsHoldingEdashButton = false
+            end
+        end)
+
+        -- Edash logic for mobile
+        local char = LocalPlayer.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                table.insert(EdashButtonConnections, RunService.RenderStepped:Connect(function()
+                    if IsHoldingEdashButton and hum.FloorMaterial ~= Enum.Material.Air then
+                        hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                    end
+                end))
+            end
+        end
+    end,
+})
+
+MovementTab:CreateDivider()
+
+MovementTab:CreateSection("Gravity")
+
+local GravitySlider = MovementTab:CreateSlider({
+    Name = "Gravity Control",
+    Range = {0, 200},
+    Increment = 1,
+    Suffix = " Gravity",
+    CurrentValue = 50,
+    Flag = "Move_Gravity",
+    Callback = function(Value)
+        Config.Gravity = Value
+        Workspace.Gravity = Value
+    end,
+})
+
+MovementTab:CreateButton({
+    Name = "Reset Gravity",
+    Callback = function()
+        Workspace.Gravity = 50
+        Config.Gravity = 50
+        GravitySlider:Set(50)
+    end,
+})
+
+-- ============================================
+-- TAB 3: VISUAL 👁️
+-- ============================================
+
+VisualTab:CreateSection("Lighting")
+
+VisualTab:CreateToggle({
+    Name = "Full Brightness",
+    CurrentValue = false,
+    Flag = "Vis_FullBright",
+    Callback = function(Value)
+        Config.FullBright = Value
+        if Value then
+            SetSuperBright(false)
+            SetFullBright(true)
+        else
+            SetFullBright(false)
+        end
+    end,
+})
+
+VisualTab:CreateToggle({
+    Name = "Super Brightness",
+    CurrentValue = false,
+    Flag = "Vis_SuperBright",
+    Callback = function(Value)
+        Config.SuperBright = Value
+        if Value then
+            SetFullBright(false)
+            SetSuperBright(true)
+        else
+            SetSuperBright(false)
+        end
+    end,
+})
+
+VisualTab:CreateToggle({
+    Name = "No Fog",
+    CurrentValue = false,
+    Flag = "Vis_NoFog",
+    Callback = function(Value)
+        Config.NoFog = Value
+        SetNoFog(Value)
+    end,
+})
+
+VisualTab:CreateToggle({
+    Name = "Vibrant Colors",
+    CurrentValue = false,
+    Flag = "Vis_Vibrant",
+    Callback = function(Value)
+        Config.Vibrant = Value
+        SetVibrant(Value)
+    end,
+})
+
+VisualTab:CreateDivider()
+
+VisualTab:CreateSection("Performance")
+
+VisualTab:CreateToggle({
+    Name = "FPS Boost Mode",
+    CurrentValue = false,
+    Flag = "Vis_FPSBoost",
+    Callback = function(Value)
+        Config.FPSBoost = Value
+        if Value then
+            for _, v in pairs(Workspace:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.Material = Enum.Material.SmoothPlastic
+                    v.Reflectance = 0
+                elseif v:IsA("Decal") then
+                    v.Transparency = 1
+                end
+            end
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        else
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level09
+        end
+    end,
+})
+
+VisualTab:CreateButton({
+    Name = "Reset Lighting",
+    Callback = function()
+        SetFullBright(false)
+        SetSuperBright(false)
+        SetNoFog(false)
+        SetVibrant(false)
+        Config.FullBright = false
+        Config.SuperBright = false
+        Config.NoFog = false
+        Config.Vibrant = false
+        Rayfield:Notify({
+            Title = "NNVN HUB",
+            Content = "Lighting reset to default!",
+            Duration = 2,
+        })
+    end,
+})
+
+-- ============================================
+-- TAB 4: MISC ⚙️
+-- ============================================
+
+MiscTab:CreateSection("Anti AFK")
+
+MiscTab:CreateToggle({
+    Name = "Anti-AFK",
+    CurrentValue = true,
+    Flag = "Misc_AntiAFK",
+    Callback = function(Value)
+        Config.AntiAFK = Value
+        if Value then
+            if Connections.AntiAFK then
+                task.cancel(Connections.AntiAFK)
+                Connections.AntiAFK = nil
+            end
+            Connections.AntiAFK = task.spawn(function()
+                while Config.AntiAFK do
+                    if LocalPlayer then
+                        VirtualUser:Button2Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+                        VirtualUser:Button2Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+                    end
+                    task.wait(60)
+                end
+            end)
+        else
+            if Connections.AntiAFK then
+                task.cancel(Connections.AntiAFK)
+                Connections.AntiAFK = nil
+            end
+        end
+    end,
+})
+
+MiscTab:CreateDivider()
+
+MiscTab:CreateSection("Info & Credits")
+
+MiscTab:CreateParagraph({
+    Title = "NNVN HUB",
+    Content = "━━━━━━━━━━━━━━━━━━\n" ..
+              "🌟 Version: 3.1\n" ..
+              "👤 Creator: N0NAMEVN\n" ..
+              "📅 Updated: 2026\n" ..
+              "━━━━━━━━━━━━━━━━━━\n\n" ..
+              "📌 Features:\n" ..
+              "• Player & Bot ESP\n" ..
+              "• Speed & Jump Boost\n" ..
+              "• Auto Edash\n" ..
+              "• Auto Revive (Self & All)\n" ..
+              "• Visual Enhancements\n" ..
+              "• Anti-AFK\n" ..
+              "• FPS Boost\n\n" ..
+              "━━━━━━━━━━━━━━━━━━\n" ..
+              "💬 Discord: Coming Soon\n" ..
+              "━━━━━━━━━━━━━━━━━━"
+})
+
+MiscTab:CreateButton({
+    Name = "Destroy GUI",
+    Callback = function()
+        Window:Destroy()
+        Rayfield:Notify({
+            Title = "NNVN HUB",
+            Content = "GUI Destroyed!",
+            Duration = 2,
+        })
+    end,
+})
+
+-- ============================================
+-- EDASH INPUT HANDLERS
+-- ============================================
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.Space and not processed then
+        IsHoldingSpace = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.Space then
+        IsHoldingSpace = false
+    end
+end)
+
+-- Edash StateChanged
+local function SetupEdash(humanoid)
+    humanoid.StateChanged:Connect(function(_, newState)
+        if newState == Enum.HumanoidStateType.Landed then
+            if IsHoldingSpace and Config.EdashEnabled then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end)
+end
+
+-- Setup edash on character
+local function OnCharacterAdded(character)
+    local hum = character:WaitForChild("Humanoid", 5)
+    if hum then
+        SetupEdash(hum)
+    end
+    -- Cleanup mobile button
+    if EdashButtonGui then
+        EdashButtonGui:Destroy()
+        EdashButtonGui = nil
+    end
+    for _, conn in pairs(EdashButtonConnections) do
+        conn:Disconnect()
+    end
+    EdashButtonConnections = {}
+end
+
+if LocalPlayer.Character then
+    OnCharacterAdded(LocalPlayer.Character)
+end
+
+LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+
+-- ============================================
+-- AUTO REVIVE LOOP (SỬA LẠI)
+-- ============================================
+
+RunService.Heartbeat:Connect(function()
+    -- Revive bản thân
+    if Config.AutoRevive then
+        if tick() - LastReviveCheck >= 5 then
+            LastReviveCheck = tick()
+            local char = LocalPlayer.Character
+            if char and char:GetAttribute("Downed") == true then
+                ReviveSelf()
+            end
+        end
+    end
+    
+    -- Revive tất cả người chơi
+    if Config.AutoReviveAll then
+        if tick() - LastReviveAllCheck >= Config.ReviveInterval then
+            LastReviveAllCheck = tick()
+            local count = ScanAndReviveAll()
+            if count > 0 then
+                -- In ra console để debug
+                -- print("Revived " .. count .. " players at " .. os.time())
+            end
+        end
+    end
+end)
+
+-- ============================================
+-- STARTUP NOTIFICATION
+-- ============================================
+
+Rayfield:Notify({
+    Title = "NNVN HUB",
+    Content = "✅ Loaded successfully!",
+    Duration = 3,
+})
+
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+print("   NNVN HUB - By N0NAMEVN")
+print("   Version 3.1 - Loaded!")
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 print(ProtectionConfig.HubName .. " Loaded Successfully!")
