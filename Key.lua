@@ -23,7 +23,7 @@ local Config = {
     Secret          = "2107", -- This makes the script ONLY run from the key script. Even if they copy the original obfuscated script to bypass the key, they won't be able to!
     
     -- [3] Scripts & Links
-    MainScriptURL   = "loadstring(game:HttpGet("https://raw.githubusercontent.com/n0namevnnek-web/Evade-Script/refs/heads/main/Evade%20Script"))()", -- The raw URL of your main script
+    MainScriptURL   = "https://raw.githubusercontent.com/n0namevnnek-web/Evade-Script/refs/heads/main/Evade%20Script"))()", -- The raw URL of your main script
     
     -- [4] Social Media Settings (Set to true to show, false to hide)
     ShowDiscord     = true,
