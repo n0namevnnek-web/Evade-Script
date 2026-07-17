@@ -50,6 +50,7 @@ local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
+local Camera = Workspace.CurrentCamera
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -93,6 +94,10 @@ local Config = {
     EspPlayers = false,
     EspBots = false,
     EspDistance = false,
+    -- Ticket Farm Settings
+    AutoFarm = false,
+    TicketESP = false,
+    TicketLineESP = false,
 }
 
 -- Connections
@@ -101,6 +106,8 @@ local Connections = {
     AntiAFK = nil,
     BotESP = nil,
     PlayerAdded = nil,
+    TicketESP = nil,
+    AutoFarm = nil,
 }
 
 -- State variables
@@ -111,6 +118,9 @@ local EdashButtonConnections = {}
 local LastReviveCheck = 0
 local LastReviveAllCheck = 0
 local OriginalLighting = {}
+local SafePlatform = nil
+local ESP_Table = {}
+local TicketFolder = nil
 
 -- Save original lighting values
 OriginalLighting = {
@@ -128,7 +138,7 @@ OriginalLighting = {
 -- ============================================
 -- CREATE TABS
 -- ============================================
-local CombatTab = Window:CreateTab("⚔️ Combat", nil)
+local MainTab = Window:CreateTab("⚔️ Main", nil)
 local MovementTab = Window:CreateTab("🏃 Movement", nil)
 local VisualTab = Window:CreateTab("👁️ Visual", nil)
 local MiscTab = Window:CreateTab("⚙️ Misc", nil)
@@ -152,18 +162,16 @@ local function ReviveSelf()
     return false
 end
 
--- Revive Other Player (SỬA LẠI)
+-- Revive Other Player
 local function RevivePlayer(player)
     if not player or player == LocalPlayer then return false end
     
     local char = player.Character
     if not char then return false end
     
-    -- Kiểm tra xem player có đang downed không
     if char:GetAttribute("Downed") == true then
         local events = ReplicatedStorage:FindFirstChild("Events")
         if events then
-            -- Cách 1: Dùng Interact event (đúng cho Evade)
             local interact = events:FindFirstChild("Character") and events.Character:FindFirstChild("Interact")
             if interact and interact:IsA("RemoteEvent") then
                 local success = false
@@ -174,7 +182,6 @@ local function RevivePlayer(player)
                 if success then return true end
             end
             
-            -- Cách 2: Dùng Player.Revive (nếu có)
             local playerRevive = events:FindFirstChild("Player") and events.Player:FindFirstChild("Revive")
             if playerRevive and playerRevive:IsA("RemoteEvent") then
                 local success = false
@@ -191,7 +198,6 @@ local function RevivePlayer(player)
                 if success then return true end
             end
             
-            -- Cách 3: Dùng ChangePlayerMode với argument đúng
             local changeMode = events:FindFirstChild("Player") and events.Player:FindFirstChild("ChangePlayerMode")
             if changeMode and changeMode:IsA("RemoteEvent") then
                 local success = false
@@ -212,7 +218,7 @@ local function RevivePlayer(player)
     return false
 end
 
--- Scan and Revive All Players (SỬA LẠI)
+-- Scan and Revive All Players
 local function ScanAndReviveAll()
     local revivedCount = 0
     local players = Players:GetPlayers()
@@ -225,7 +231,6 @@ local function ScanAndReviveAll()
                 local isDowned = char:GetAttribute("Downed")
                 local health = humanoid and humanoid.Health or 0
                 
-                -- Nếu đang downed hoặc health <= 0
                 if isDowned == true or health <= 0 then
                     local success = RevivePlayer(player)
                     if success then
@@ -239,12 +244,178 @@ local function ScanAndReviveAll()
     return revivedCount
 end
 
--- ESP Functions
+-- ============================================
+-- TICKET FARM FUNCTIONS
+-- ============================================
+
+-- Tìm Ticket Folder
+local function FindTicketFolder()
+    local gameFolder = Workspace:FindFirstChild("Game")
+    if gameFolder then
+        local effects = gameFolder:FindFirstChild("Effects")
+        if effects then
+            local tickets = effects:FindFirstChild("Tickets")
+            if tickets then
+                TicketFolder = tickets
+                return tickets
+            end
+        end
+    end
+    return nil
+end
+
+-- Tạo Safe Zone (Auto Farm)
+local function CreateSafePlatform()
+    if SafePlatform then return end
+    
+    local part = Instance.new("Part")
+    part.Name = "NNVNAutoFarm"
+    part.Size = Vector3.new(50, 2, 50)
+    part.Position = Vector3.new(0, 5000, 0) - Vector3.new(0, 4, 0)
+    part.Anchored = true
+    part.CanCollide = true
+    part.Transparency = 0.5
+    part.Color = Color3.fromRGB(0, 255, 255)
+    part.Material = Enum.Material.Neon
+    part.Parent = Workspace
+    
+    SafePlatform = part
+end
+
+-- Xóa Safe Zone
+local function RemoveSafePlatform()
+    if SafePlatform then
+        SafePlatform:Destroy()
+        SafePlatform = nil
+    end
+end
+
+-- Ticket ESP
+local function CreateTicketESP(obj)
+    if ESP_Table[obj] then return end
+    
+    local h = Instance.new("Highlight")
+    h.Name = "TicketESP_Highlight"
+    h.Adornee = obj
+    h.FillColor = Color3.fromRGB(255, 200, 0)
+    h.FillTransparency = 0.5
+    h.OutlineColor = Color3.fromRGB(255, 200, 0)
+    h.OutlineTransparency = 0
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.Enabled = true
+    h.Parent = obj
+    
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "TicketESP_Billboard"
+    bb.Size = UDim2.new(0, 60, 0, 20)
+    bb.AlwaysOnTop = true
+    bb.StudsOffset = Vector3.new(0, 2, 0)
+    bb.Parent = obj
+    
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, 0, 1, 0)
+    t.BackgroundTransparency = 1
+    t.Text = "🎫 TICKET"
+    t.TextColor3 = Color3.fromRGB(255, 200, 0)
+    t.TextScaled = true
+    t.Font = Enum.Font.GothamBold
+    t.Parent = bb
+    
+    local l = Drawing.new("Line")
+    l.Visible = false
+    l.Color = Color3.fromRGB(255, 200, 0)
+    l.Thickness = 1
+    
+    ESP_Table[obj] = {Line = l, Highlight = h, Billboard = bb, Part = obj}
+    
+    obj.AncestryChanged:Connect(function(_, p)
+        if not p then RemoveTicketESP(obj) end
+    end)
+end
+
+local function RemoveTicketESP(obj)
+    if ESP_Table[obj] then
+        if ESP_Table[obj].Line then ESP_Table[obj].Line:Remove() end
+        if ESP_Table[obj].Highlight then ESP_Table[obj].Highlight:Destroy() end
+        if ESP_Table[obj].Billboard then ESP_Table[obj].Billboard:Destroy() end
+        ESP_Table[obj] = nil
+    end
+end
+
+-- Get Screen Edge Position cho Line ESP
+local function GetScreenEdgePosition(center, dir, vpSize, offset)
+    local halfX = (vpSize.X / 2) - offset
+    local halfY = (vpSize.Y / 2) - offset
+    local slope = dir.Y / dir.X
+    local factor = math.min(halfX / math.abs(dir.X), halfY / math.abs(dir.Y))
+    return center + (dir * factor)
+end
+
+-- Auto Farm Loop (Safe Zone)
+local function StartAutoFarm()
+    if Connections.AutoFarm then
+        Connections.AutoFarm:Disconnect()
+        Connections.AutoFarm = nil
+    end
+    
+    CreateSafePlatform()
+    
+    Connections.AutoFarm = RunService.Heartbeat:Connect(function()
+        if not Config.AutoFarm then return end
+        
+        local char = LocalPlayer.Character
+        if not char then return end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        
+        -- Tìm ticket
+        local targetTicket = nil
+        if TicketFolder then
+            for _, v in ipairs(TicketFolder:GetDescendants()) do
+                if v:IsA("BasePart") and v.Parent then
+                    targetTicket = v
+                    break
+                end
+            end
+        end
+        
+        if targetTicket then
+            -- Teleport đến ticket
+            hrp.CFrame = targetTicket.CFrame + Vector3.new(0, 2, 0)
+            task.wait(0.35)
+            
+            -- Quay về Safe Zone
+            if SafePlatform then
+                hrp.CFrame = CFrame.new(Vector3.new(0, 5000, 0) + Vector3.new(0, 3, 0))
+            end
+            task.wait(0.1)
+        else
+            -- Không có ticket -> đứng ở Safe Zone
+            if SafePlatform then
+                if (hrp.Position - Vector3.new(0, 5000, 0)).Magnitude > 50 then
+                    hrp.CFrame = CFrame.new(Vector3.new(0, 5000, 0) + Vector3.new(0, 3, 0))
+                end
+            end
+        end
+    end)
+end
+
+local function StopAutoFarm()
+    if Connections.AutoFarm then
+        Connections.AutoFarm:Disconnect()
+        Connections.AutoFarm = nil
+    end
+    RemoveSafePlatform()
+end
+
+-- ============================================
+-- ESP FUNCTIONS (GỐC)
+-- ============================================
 local function CreateESP(character, color, text, parentPart, yOffset)
     if not character or not parentPart or not parentPart:IsA("BasePart") then return end
     if character:FindFirstChild("ESP_Highlight") then return end
 
-    -- Highlight
     local highlight = Instance.new("Highlight")
     highlight.Name = "ESP_Highlight"
     highlight.Adornee = character
@@ -255,7 +426,6 @@ local function CreateESP(character, color, text, parentPart, yOffset)
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Parent = character
 
-    -- Billboard
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "ESP_Billboard"
     billboard.Size = UDim2.new(0, 120, 0, 40)
@@ -273,7 +443,6 @@ local function CreateESP(character, color, text, parentPart, yOffset)
     label.Font = Enum.Font.GothamBold
     label.Parent = billboard
 
-    -- Distance updater
     task.spawn(function()
         local cam = Workspace.CurrentCamera
         while highlight.Parent and billboard.Parent and parentPart.Parent and cam do
@@ -301,7 +470,9 @@ local function RemoveESP(character, parentPart)
     end
 end
 
--- Lighting Functions
+-- ============================================
+-- LIGHTING FUNCTIONS
+-- ============================================
 local function SetFullBright(enabled)
     if enabled then
         Lighting.Brightness = 2
@@ -350,15 +521,41 @@ local function SetVibrant(enabled)
 end
 
 -- ============================================
--- TAB 1: COMBAT ⚔️
+-- TAB 1: MAIN ⚔️
 -- ============================================
 
-CombatTab:CreateSection("ESP Settings")
+-- ============================================
+-- MAIN FARM SECTION (LÊN ĐẦU)
+-- ============================================
+MainTab:CreateSection("Main Farm")
 
-CombatTab:CreateToggle({
+-- Auto Farm (lên đầu)
+MainTab:CreateToggle({
+    Name = "Auto Farm",
+    CurrentValue = false,
+    Flag = "Main_AutoFarm",
+    Callback = function(Value)
+        Config.AutoFarm = Value
+        if Value then
+            FindTicketFolder()
+            StartAutoFarm()
+        else
+            StopAutoFarm()
+        end
+    end,
+})
+
+MainTab:CreateDivider()
+
+-- ============================================
+-- ESP Settings
+-- ============================================
+MainTab:CreateSection("ESP Settings")
+
+MainTab:CreateToggle({
     Name = "Player ESP",
     CurrentValue = false,
-    Flag = "Combat_PlayerESP",
+    Flag = "Main_PlayerESP",
     Callback = function(Value)
         Config.EspPlayers = Value
         if Value then
@@ -389,10 +586,10 @@ CombatTab:CreateToggle({
     end,
 })
 
-CombatTab:CreateToggle({
+MainTab:CreateToggle({
     Name = "Bot ESP",
     CurrentValue = false,
-    Flag = "Combat_BotESP",
+    Flag = "Main_BotESP",
     Callback = function(Value)
         Config.EspBots = Value
         if Value then
@@ -425,57 +622,53 @@ CombatTab:CreateToggle({
     end,
 })
 
-CombatTab:CreateToggle({
+MainTab:CreateToggle({
     Name = "Show Distance",
     CurrentValue = false,
-    Flag = "Combat_Distance",
+    Flag = "Main_Distance",
     Callback = function(Value)
         Config.EspDistance = Value
     end,
 })
 
-CombatTab:CreateDivider()
+MainTab:CreateDivider()
 
 -- ============================================
 -- REVIVE SECTION
 -- ============================================
-CombatTab:CreateSection("Revive")
+MainTab:CreateSection("Revive")
 
--- Auto Revive Self
-CombatTab:CreateToggle({
+MainTab:CreateToggle({
     Name = "Auto Revive Self",
     CurrentValue = false,
-    Flag = "Combat_AutoRevive",
+    Flag = "Main_AutoRevive",
     Callback = function(Value)
         Config.AutoRevive = Value
     end,
 })
 
--- Auto Revive All Players
-CombatTab:CreateToggle({
+MainTab:CreateToggle({
     Name = "Auto Revive All Players",
     CurrentValue = false,
-    Flag = "Combat_AutoReviveAll",
+    Flag = "Main_AutoReviveAll",
     Callback = function(Value)
         Config.AutoReviveAll = Value
     end,
 })
 
--- Revive Interval Slider
-CombatTab:CreateSlider({
+MainTab:CreateSlider({
     Name = "Revive Check Interval",
     Range = {1, 10},
     Increment = 0.5,
     Suffix = "s",
     CurrentValue = 3,
-    Flag = "Combat_ReviveInterval",
+    Flag = "Main_ReviveInterval",
     Callback = function(Value)
         Config.ReviveInterval = Value
     end,
 })
 
--- Revive Self Now
-CombatTab:CreateButton({
+MainTab:CreateButton({
     Name = "Revive Self Now",
     Callback = function()
         if ReviveSelf() then
@@ -494,8 +687,7 @@ CombatTab:CreateButton({
     end,
 })
 
--- Revive All Now
-CombatTab:CreateButton({
+MainTab:CreateButton({
     Name = "Revive All Players Now",
     Callback = function()
         local count = ScanAndReviveAll()
@@ -506,6 +698,103 @@ CombatTab:CreateButton({
         })
     end,
 })
+
+MainTab:CreateDivider()
+
+-- ============================================
+-- TICKET ESP SECTION (ĐỔI TÊN THÀNH Main Farm ESP)
+-- ============================================
+MainTab:CreateSection("Main Farm ESP")
+
+-- Ticket ESP
+MainTab:CreateToggle({
+    Name = "Ticket ESP",
+    CurrentValue = false,
+    Flag = "Main_TicketESP",
+    Callback = function(Value)
+        Config.TicketESP = Value
+        
+        if Value then
+            FindTicketFolder()
+            
+            if TicketFolder then
+                for _, v in ipairs(TicketFolder:GetDescendants()) do
+                    if v:IsA("BasePart") then
+                        CreateTicketESP(v)
+                    end
+                end
+            end
+            
+            if Connections.TicketESP then
+                Connections.TicketESP:Disconnect()
+                Connections.TicketESP = nil
+            end
+            
+            Connections.TicketESP = TicketFolder.DescendantAdded:Connect(function(v)
+                if v:IsA("BasePart") and Config.TicketESP then
+                    CreateTicketESP(v)
+                end
+            end)
+        else
+            if Connections.TicketESP then
+                Connections.TicketESP:Disconnect()
+                Connections.TicketESP = nil
+            end
+            
+            for obj, _ in pairs(ESP_Table) do
+                RemoveTicketESP(obj)
+            end
+            table.clear(ESP_Table)
+        end
+    end,
+})
+
+-- Line ESP
+MainTab:CreateToggle({
+    Name = "Line ESP (Show Direction)",
+    CurrentValue = false,
+    Flag = "Main_LineESP",
+    Callback = function(Value)
+        Config.TicketLineESP = Value
+    end,
+})
+
+-- ============================================
+-- LINE ESP RENDER
+-- ============================================
+
+RunService.RenderStepped:Connect(function()
+    if not Config.TicketESP or not Config.TicketLineESP then
+        for _, d in pairs(ESP_Table) do
+            if d.Line then
+                d.Line.Visible = false
+            end
+        end
+        return
+    end
+    
+    local vp = Camera.ViewportSize
+    local center = Vector2.new(vp.X / 2, vp.Y / 2)
+    
+    for obj, d in pairs(ESP_Table) do
+        if not d.Part or not d.Part.Parent then
+            RemoveTicketESP(obj)
+            continue
+        end
+        
+        local pos, onScreen = Camera:WorldToViewportPoint(d.Part.Position)
+        d.Line.Visible = true
+        d.Line.From = center
+        
+        if onScreen then
+            d.Line.To = Vector2.new(pos.X, pos.Y)
+        else
+            local dir = (Vector2.new(pos.X, pos.Y) - center)
+            if pos.Z < 0 then dir = -dir end
+            d.Line.To = GetScreenEdgePosition(center, dir.Unit, vp, 25)
+        end
+    end
+end)
 
 -- ============================================
 -- TAB 2: MOVEMENT 🏃
@@ -636,7 +925,6 @@ MovementTab:CreateButton({
 
         EdashButtonGui = screenGui
 
-        -- Dragging
         local dragging = false
         local dragInput, dragStart, buttonStart
 
@@ -670,7 +958,6 @@ MovementTab:CreateButton({
             end
         end)
 
-        -- Edash logic for mobile
         local char = LocalPlayer.Character
         if char then
             local hum = char:FindFirstChildOfClass("Humanoid")
@@ -854,7 +1141,7 @@ MiscTab:CreateSection("Info & Credits")
 MiscTab:CreateParagraph({
     Title = "NNVN HUB",
     Content = "━━━━━━━━━━━━━━━━━━\n" ..
-              "🌟 Version: 3.1\n" ..
+              "🌟 Version: 4.0\n" ..
               "👤 Creator: N0NAMEVN\n" ..
               "📅 Updated: 2026\n" ..
               "━━━━━━━━━━━━━━━━━━\n\n" ..
@@ -863,6 +1150,8 @@ MiscTab:CreateParagraph({
               "• Speed & Jump Boost\n" ..
               "• Auto Edash\n" ..
               "• Auto Revive (Self & All)\n" ..
+              "• Auto Farm Tickets 🎫\n" ..
+              "• Ticket ESP + Line ESP\n" ..
               "• Visual Enhancements\n" ..
               "• Anti-AFK\n" ..
               "• FPS Boost\n\n" ..
@@ -899,7 +1188,6 @@ UserInputService.InputEnded:Connect(function(input, processed)
     end
 end)
 
--- Edash StateChanged
 local function SetupEdash(humanoid)
     humanoid.StateChanged:Connect(function(_, newState)
         if newState == Enum.HumanoidStateType.Landed then
@@ -910,13 +1198,11 @@ local function SetupEdash(humanoid)
     end)
 end
 
--- Setup edash on character
 local function OnCharacterAdded(character)
     local hum = character:WaitForChild("Humanoid", 5)
     if hum then
         SetupEdash(hum)
     end
-    -- Cleanup mobile button
     if EdashButtonGui then
         EdashButtonGui:Destroy()
         EdashButtonGui = nil
@@ -934,11 +1220,10 @@ end
 LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
 
 -- ============================================
--- AUTO REVIVE LOOP (SỬA LẠI)
+-- AUTO REVIVE LOOP
 -- ============================================
 
 RunService.Heartbeat:Connect(function()
-    -- Revive bản thân
     if Config.AutoRevive then
         if tick() - LastReviveCheck >= 5 then
             LastReviveCheck = tick()
@@ -949,14 +1234,12 @@ RunService.Heartbeat:Connect(function()
         end
     end
     
-    -- Revive tất cả người chơi
     if Config.AutoReviveAll then
         if tick() - LastReviveAllCheck >= Config.ReviveInterval then
             LastReviveAllCheck = tick()
             local count = ScanAndReviveAll()
             if count > 0 then
-                -- In ra console để debug
-                -- print("Revived " .. count .. " players at " .. os.time())
+                -- print("Revived " .. count .. " players")
             end
         end
     end
@@ -974,6 +1257,6 @@ Rayfield:Notify({
 
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 print("   NNVN HUB - By N0NAMEVN")
-print("   Version 3.1 - Loaded!")
+print("   Version 4.0 - Main Farm Updated!")
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 print(ProtectionConfig.HubName .. " Loaded Successfully!")
